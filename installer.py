@@ -14,7 +14,7 @@ GITHUB_API = "https://api.github.com"
 DEFAULT_UPDATE_JSON_RELATIVE = os.path.join("backend", "update.json")
 DEFAULT_VERSION_JSON_RELATIVE = os.path.join("backend", "version.json")
 
-ENABLE_COLOR = sys.stdout.isatty()
+ENABLE_COLOR = getattr(sys.stdout, "isatty", lambda: False)()
 CLR = {
     'reset': "\033[0m" if ENABLE_COLOR else "",
     'dim': "\033[2m" if ENABLE_COLOR else "",
@@ -256,3 +256,4 @@ if __name__ == "__main__":
         print(f"{CLR['green']}Done!{CLR['reset']} {CLR['dim']}Press any key to restart Steam and apply changes!{CLR['reset']}")
         wait_for_keypress("")
         restart_steam(steam_path, lambda m, level='info': log_to_widget(None, m, level))
+
