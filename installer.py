@@ -210,7 +210,8 @@ def do_install(ui_log=None) -> str:
         targets = find_plugin_targets(steam_path, log)
         extract_zip_bytes_to_targets(zip_bytes, targets, log)
 
-        write_version_json(plugin_root, latest_tag, log)
+        for target in targets:
+            write_version_json(target, latest_tag, log)
 
         log("Installation complete.", level='ok')
         return steam_path
