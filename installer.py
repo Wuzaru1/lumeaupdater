@@ -164,33 +164,42 @@ def fetch_latest_release_zip(cfg: dict, log: callable) -> tuple[bytes, str]:
 
 
 def find_plugin_targets(steam_path: str, log: callable) -> list[str]:
+    import shutil
+
     plugins_dir = os.path.join(steam_path, "plugins")
     os.makedirs(plugins_dir, exist_ok=True)
-    matches: list[str] = []
-    for root, _dirs, files in os.walk(plugins_dir):
-        if "plugin.json" in files:
-            try:
-                p = os.path.join(root, "plugin.json")
-                with open(p, "r", encoding="utf-8") as f:
-                    txt = f.read()
-                if re.search(r'"common_name"\s*:\s*"Lumea"', txt) or re.search(r'"name"\s*:\s*"lumea"', txt):
-                    matches.append(root)
-            except Exception:
-                continue
-    if matches:
-        log(f"Found {len(matches)} Lumea plugin location(s)")
-        return matches
-    target = os.path.join(plugins_dir, "Lumea")
-    os.makedirs(target, exist_ok=True)
-    log(f"No existing Lumea plugin found; using {target}")
-    return [target]
+
+    for name in os.listdir(plugins_dir):
+        if name.lower() in ("lumea", "lumeaplugin"):
+            old_path = os.path.join(plugins_dir, name)
+            if os.path.isdir(old_path):
+                try:
+                    log(f"Removing old plugin folder: {old_path}")
+                    shutil.rmtree(old_path, ignore_errors=True)
+                except Exception as e:
+                    log(f"Failed to remove {old_path}: {e}", level="warn")
+
+    log(f"Using plugins directory as target: {plugins_dir}")
+    return [plugins_dir]
 
 
 def extract_zip_bytes_to_targets(zip_bytes: bytes, targets: list[str], log: callable) -> None:
     with zipfile.ZipFile(BytesIO(zip_bytes)) as zf:
         for target in targets:
-            log(f"Extracting to {target} ...")
-            zf.extractall(target)
+            log(f"Extracting plugin contents directly into {target} ...")
+
+            # Extract files directly, ignoring GitHub's top-level folder
+            members = zf.namelist()
+            root_prefix = os.path.commonprefix(members)
+            for member in members:
+                # Skip directory entries
+                if member.endswith("/"):
+                    continue
+
+                dest_path = os.path.join(target, os.path.relpath(member, root_prefix))
+                os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+                with open(dest_path, "wb") as f:
+                    f.write(zf.read(member))
 
 
 def do_install(ui_log=None) -> str:
@@ -256,4 +265,3 @@ if __name__ == "__main__":
         print(f"{CLR['green']}Done!{CLR['reset']} {CLR['dim']}Press any key to restart Steam and apply changes!{CLR['reset']}")
         wait_for_keypress("")
         restart_steam(steam_path, lambda m, level='info': log_to_widget(None, m, level))
-
