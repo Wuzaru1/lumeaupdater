@@ -7,6 +7,7 @@ import zipfile
 import subprocess
 from io import BytesIO
 
+from typing import Callable
 import requests
 
 
@@ -51,7 +52,7 @@ def detect_steam_path() -> str:
     return os.path.abspath(steam_path) if steam_path else ""
 
 
-def ensure_millennium_installed(log: callable) -> None:
+def ensure_millennium_installed(log: Callable[..., None]) -> None:
     steam_path = detect_steam_path()
     if not steam_path:
         log("Steam path not found in registry; continuing anyway.")
@@ -94,7 +95,7 @@ def read_update_config(config_path: str) -> dict:
         }
 
 
-def write_version_json(plugin_root: str, version: str, log: callable) -> None:
+def write_version_json(plugin_root: str, version: str, log: Callable[..., None]) -> None:
     try:
         backend_dir = os.path.join(plugin_root, "backend")
         os.makedirs(backend_dir, exist_ok=True)
@@ -106,7 +107,7 @@ def write_version_json(plugin_root: str, version: str, log: callable) -> None:
         log(f"Failed writing version.json: {e}", level='warn')
 
 
-def fetch_latest_release_zip(cfg: dict, log: callable) -> tuple[bytes, str]:
+def fetch_latest_release_zip(cfg: dict, log: Callable[..., None]) -> tuple[bytes, str]:
     gh = cfg.get("github") or {}
     owner = str(gh.get("owner", "")).strip()
     repo = str(gh.get("repo", "")).strip()
@@ -162,15 +163,20 @@ def fetch_latest_release_zip(cfg: dict, log: callable) -> tuple[bytes, str]:
     log(f"Downloaded {len(content):,} bytes")
     return content, tag_name
 
-def find_plugin_targets(steam_path: str, log: callable) -> list[str]:
+def find_plugin_targets(steam_path: str, log: Callable[..., None]) -> list[str]:
     import shutil
 
     plugins_dir = os.path.join(steam_path, "plugins")
     os.makedirs(plugins_dir, exist_ok=True)
 
-    # Remove any existing Lumea or LumeaPlugin folders
+    # Canonical plugin directory name
+    plugin_folder_name = "LumeaPlugin"
+    plugin_dir = os.path.join(plugins_dir, plugin_folder_name)
+
+    # Remove any old Lumea plugin folders if they exist
     for name in os.listdir(plugins_dir):
-        if name.lower() in ("lumea", "lumeaplugin"):
+        lower = name.lower()
+        if lower in ("lumea", "lumeaplugin"):
             old_path = os.path.join(plugins_dir, name)
             if os.path.isdir(old_path):
                 try:
@@ -179,37 +185,57 @@ def find_plugin_targets(steam_path: str, log: callable) -> list[str]:
                 except Exception as e:
                     log(f"Failed to remove {old_path}: {e}", level="warn")
 
-    # Create a fresh LumeaPlugin folder for new install
-    target = os.path.join(plugins_dir, "LumeaPlugin")
-    os.makedirs(target, exist_ok=True)
-    log(f"Using fresh plugin folder: {target}")
-    return [target]
+    # Ensure the plugin target directory exists
+    os.makedirs(plugin_dir, exist_ok=True)
+
+    # Target is the LumeaPlugin subfolder inside plugins
+    log(f"Using Steam plugin directory: {plugin_dir}")
+    return [plugin_dir]
 
 
-def extract_zip_bytes_to_targets(zip_bytes: bytes, targets: list[str], log: callable) -> None:
-    import os
+def extract_zip_bytes_to_targets(zip_bytes: bytes, targets: list[str], log: Callable[..., None]) -> None:
+    import shutil
     with zipfile.ZipFile(BytesIO(zip_bytes)) as zf:
         for target in targets:
-            log(f"Extracting plugin files into {target} ...")
+            log(f"Extracting release archive to {target} ...")
 
-            # Detect and remove a single top-level folder (common with GitHub zips)
-            top_level_dirs = {name.split("/")[0] for name in zf.namelist() if "/" in name}
-            if len(top_level_dirs) == 1:
-                prefix = list(top_level_dirs)[0] + "/"
-            else:
-                prefix = ""
+            # Extract to a temporary directory first to normalize layout
+            tmp_dir = os.path.join(target, "__tmp_extract__")
+            try:
+                shutil.rmtree(tmp_dir, ignore_errors=True)
+                os.makedirs(tmp_dir, exist_ok=True)
+                zf.extractall(tmp_dir)
 
-            for member in zf.namelist():
-                if member.endswith("/"):
-                    continue
+                # Determine actual root of the extracted content:
+                # - If the archive contains a single top-level folder, use it.
+                # - Otherwise, treat the temp directory as the root.
+                entries = [e for e in os.listdir(tmp_dir) if e not in (".", "..")]
+                if len(entries) == 1 and os.path.isdir(os.path.join(tmp_dir, entries[0])):
+                    src_root = os.path.join(tmp_dir, entries[0])
+                else:
+                    src_root = tmp_dir
 
-                # Strip off the GitHub folder prefix (e.g. lumeasteamplugin-main/)
-                rel_path = member[len(prefix):] if member.startswith(prefix) else member
-                dest_path = os.path.join(target, rel_path)
-
-                os.makedirs(os.path.dirname(dest_path), exist_ok=True)
-                with open(dest_path, "wb") as f:
-                    f.write(zf.read(member))
+                # Move all items from src_root into the target directory
+                for name in os.listdir(src_root):
+                    src = os.path.join(src_root, name)
+                    dst = os.path.join(target, name)
+                    try:
+                        if os.path.isdir(src):
+                            shutil.rmtree(dst, ignore_errors=True)
+                            shutil.move(src, dst)
+                        else:
+                            os.makedirs(os.path.dirname(dst), exist_ok=True)
+                            if os.path.exists(dst):
+                                os.remove(dst)
+                            shutil.move(src, dst)
+                    except Exception as e:
+                        log(f"Failed moving {name}: {e}", level="warn")
+            finally:
+                # Cleanup temp directory
+                try:
+                    shutil.rmtree(tmp_dir, ignore_errors=True)
+                except Exception:
+                    pass
 
 def do_install(ui_log=None) -> str:
     log = lambda m, level='info': log_to_widget(None, m, level)
@@ -238,7 +264,7 @@ def do_install(ui_log=None) -> str:
         return ""
 
 
-def restart_steam(steam_path: str, log: callable) -> None:
+def restart_steam(steam_path: str, log: Callable[..., None]) -> None:
     if not steam_path:
         log("Cannot restart Steam: unknown Steam path", level='warn')
         return
@@ -274,5 +300,3 @@ if __name__ == "__main__":
         print(f"{CLR['green']}Done!{CLR['reset']} {CLR['dim']}Press any key to restart Steam and apply changes!{CLR['reset']}")
         wait_for_keypress("")
         restart_steam(steam_path, lambda m, level='info': log_to_widget(None, m, level))
-
-
