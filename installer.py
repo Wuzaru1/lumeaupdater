@@ -162,13 +162,13 @@ def fetch_latest_release_zip(cfg: dict, log: callable) -> tuple[bytes, str]:
     log(f"Downloaded {len(content):,} bytes")
     return content, tag_name
 
-
 def find_plugin_targets(steam_path: str, log: callable) -> list[str]:
     import shutil
 
     plugins_dir = os.path.join(steam_path, "plugins")
     os.makedirs(plugins_dir, exist_ok=True)
 
+    # Remove any old Lumea plugin folders if they exist
     for name in os.listdir(plugins_dir):
         if name.lower() in ("lumea", "lumeaplugin"):
             old_path = os.path.join(plugins_dir, name)
@@ -179,28 +179,16 @@ def find_plugin_targets(steam_path: str, log: callable) -> list[str]:
                 except Exception as e:
                     log(f"Failed to remove {old_path}: {e}", level="warn")
 
-    log(f"Using plugins directory as target: {plugins_dir}")
+    # Target is just the plugins folder itself
+    log(f"Using Steam plugins folder: {plugins_dir}")
     return [plugins_dir]
 
 
 def extract_zip_bytes_to_targets(zip_bytes: bytes, targets: list[str], log: callable) -> None:
     with zipfile.ZipFile(BytesIO(zip_bytes)) as zf:
         for target in targets:
-            log(f"Extracting plugin contents directly into {target} ...")
-
-            # Extract files directly, ignoring GitHub's top-level folder
-            members = zf.namelist()
-            root_prefix = os.path.commonprefix(members)
-            for member in members:
-                # Skip directory entries
-                if member.endswith("/"):
-                    continue
-
-                dest_path = os.path.join(target, os.path.relpath(member, root_prefix))
-                os.makedirs(os.path.dirname(dest_path), exist_ok=True)
-                with open(dest_path, "wb") as f:
-                    f.write(zf.read(member))
-
+            log(f"Extracting release archive to {target} ...")
+            zf.extractall(target)
 
 def do_install(ui_log=None) -> str:
     log = lambda m, level='info': log_to_widget(None, m, level)
@@ -265,3 +253,4 @@ if __name__ == "__main__":
         print(f"{CLR['green']}Done!{CLR['reset']} {CLR['dim']}Press any key to restart Steam and apply changes!{CLR['reset']}")
         wait_for_keypress("")
         restart_steam(steam_path, lambda m, level='info': log_to_widget(None, m, level))
+
