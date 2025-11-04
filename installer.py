@@ -9,7 +9,20 @@ from io import BytesIO
 
 from typing import Callable
 import requests
+import ctypes, sys, os
 
+def ensure_admin():
+    try:
+        if ctypes.windll.shell32.IsUserAnAdmin():
+            return True
+    except:
+        pass
+    print("Requesting administrator privileges...")
+    params = " ".join([f'"{arg}"' for arg in sys.argv])
+    ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, params, None, 1)
+    sys.exit()
+
+ensure_admin()
 
 GITHUB_API = "https://api.github.com"
 DEFAULT_UPDATE_JSON_RELATIVE = os.path.join("backend", "update.json")
@@ -57,28 +70,24 @@ def ensure_millennium_installed(log: Callable[..., None]) -> None:
     if not steam_path:
         log("Steam path not found in registry; continuing anyway.")
 
-    marker_guess = os.path.join(steam_path or "", "steamui")
-    already_present = os.path.isdir(marker_guess)
-    if already_present:
-        log(f"Detected Steam UI directory: {marker_guess}")
+    marker_dir = os.path.join(steam_path or "", "steamui")
+    millennium_installed = os.path.isdir(marker_dir) and os.path.exists(os.path.join(marker_dir, "index.html"))
+    if millennium_installed:
+        log("Millennium already detected; skipping install.", level="ok")
+        return
+
+    log("Millennium not detected. Installing via current CMD session...")
 
     try:
-        log("Ensuring Millennium is installed (this is safe to re-run)...")
-        cmd = (
-            "powershell.exe",
-            "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-Command",
-            "iwr -useb 'https://steambrew.app/install.ps1' | iex",
-        )
-        completed = subprocess.run(cmd, check=False, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-        if completed.returncode == 0:
-            log("Millennium installation step finished.", level='ok')
+        # Use PowerShell in the same window, with visible output
+        cmd = 'powershell -NoProfile -ExecutionPolicy Bypass -Command "iwr -useb https://steambrew.app/install.ps1 | iex"'
+        result = subprocess.call(cmd, shell=True)
+        if result == 0:
+            log("Millennium installation completed successfully.", level="ok")
         else:
-            log("Millennium install step returned a non-zero exit code (continuing)", level='warn')
+            log(f"Millennium installation returned code {result}.", level="warn")
     except Exception as e:
-        log(f"Millennium install step failed (non-fatal): {e}", level='warn')
+        log(f"Millennium installation failed: {e}", level="err")
 
 
 def read_update_config(config_path: str) -> dict:
