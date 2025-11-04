@@ -6,10 +6,9 @@ import time
 import zipfile
 import subprocess
 from io import BytesIO
-
 from typing import Callable
 import requests
-import ctypes, sys, os
+import ctypes
 
 def ensure_admin():
     try:
@@ -71,15 +70,18 @@ def ensure_millennium_installed(log: Callable[..., None]) -> None:
         log("Steam path not found in registry; continuing anyway.")
 
     marker_dir = os.path.join(steam_path or "", "steamui")
-    millennium_installed = os.path.isdir(marker_dir) and os.path.exists(os.path.join(marker_dir, "index.html"))
+    millennium_installed = (
+        os.path.isdir(marker_dir)
+        and any("millennium" in name.lower() for name in os.listdir(marker_dir))
+    )
+
     if millennium_installed:
-        log("Millennium already detected; skipping install.", level="ok")
+        log("Millennium detected — skipping install.", level="ok")
         return
 
     log("Millennium not detected. Installing via current CMD session...")
 
     try:
-        # Use PowerShell in the same window, with visible output
         cmd = 'powershell -NoProfile -ExecutionPolicy Bypass -Command "iwr -useb https://steambrew.app/install.ps1 | iex"'
         result = subprocess.call(cmd, shell=True)
         if result == 0:
@@ -309,3 +311,4 @@ if __name__ == "__main__":
         print(f"{CLR['green']}Done!{CLR['reset']} {CLR['dim']}Press any key to restart Steam and apply changes!{CLR['reset']}")
         wait_for_keypress("")
         restart_steam(steam_path, lambda m, level='info': log_to_widget(None, m, level))
+
